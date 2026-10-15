@@ -1,10 +1,12 @@
 package com.example.financebuddy
 
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -22,11 +24,13 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.financebuddy.ui.theme.FinanceBuddyTheme
+import org.json.JSONArray
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.ceil
@@ -227,23 +231,71 @@ fun FinanceBuddyApp() {
     // 0 Welcome, 1 Profile, 2 Finances, 3 Goals, 4 Dashboard,
     // 5 Budget Tracker, 6 Simulator, 7 Learning Hub, 8 Lesson, 9 Quiz,
     // 10 Real-Life Scenarios, 11 CPF Calculator
-    var screen by rememberSaveable { mutableIntStateOf(0) }
-    var name by rememberSaveable { mutableStateOf("") }
-    var experience by rememberSaveable { mutableStateOf("Less than 1 year") }
-    var employment by rememberSaveable { mutableStateOf("Full-time employed") }
-    var income by rememberSaveable { mutableStateOf("") }
+    // Financial records are stored privately on this Android device.
+    // SharedPreferences avoids extra Gradle dependencies for this prototype.
+    val context = LocalContext.current
+    val localStorage = remember(context) {
+        context.getSharedPreferences("financebuddy_local_data", Context.MODE_PRIVATE)
+    }
+    val restoredCategories = remember(localStorage) {
+        try {
+            val array = JSONArray(localStorage.getString("categories", "[\"0\",\"0\",\"0\",\"0\",\"0\",\"0\",\"0\"]"))
+            if (array.length() == categoryNames.size) {
+                List(categoryNames.size) { index -> array.optString(index, "0") }
+            } else List(categoryNames.size) { "0" }
+        } catch (_: Exception) {
+            List(categoryNames.size) { "0" }
+        }
+    }
+    var setupComplete by rememberSaveable {
+        mutableStateOf(localStorage.getBoolean("setup_complete", false))
+    }
+    var screen by rememberSaveable { mutableIntStateOf(if (setupComplete) 4 else 0) }
+    var name by rememberSaveable { mutableStateOf(localStorage.getString("name", "") ?: "") }
+    var experience by rememberSaveable {
+        mutableStateOf(localStorage.getString("experience", "Less than 1 year") ?: "Less than 1 year")
+    }
+    var employment by rememberSaveable {
+        mutableStateOf(localStorage.getString("employment", "Full-time employed") ?: "Full-time employed")
+    }
+    var income by rememberSaveable { mutableStateOf(localStorage.getString("income", "") ?: "") }
     var expenses by rememberSaveable { mutableStateOf("") }
-    var savings by rememberSaveable { mutableStateOf("") }
+    var savings by rememberSaveable { mutableStateOf(localStorage.getString("savings", "") ?: "") }
     var budgetOnboarding by rememberSaveable { mutableStateOf(false) }
     var editingFinances by rememberSaveable { mutableStateOf(false) }
-    var goal by rememberSaveable { mutableStateOf("Emergency Fund") }
-    var target by rememberSaveable { mutableStateOf("") }
-    var contribution by rememberSaveable { mutableStateOf("") }
+    var goal by rememberSaveable {
+        mutableStateOf(localStorage.getString("goal", "Emergency Fund") ?: "Emergency Fund")
+    }
+    var target by rememberSaveable { mutableStateOf(localStorage.getString("target", "") ?: "") }
+    var contribution by rememberSaveable { mutableStateOf(localStorage.getString("contribution", "") ?: "") }
     // Portion of existing total savings reserved specifically for this goal.
-    var goalAllocated by rememberSaveable { mutableStateOf("0") }
-    var savedCategories by rememberSaveable { mutableStateOf(List(7) { "0" }) }
-    var draftCategories by rememberSaveable { mutableStateOf(List(7) { "0" }) }
-    var hasSavedBudget by rememberSaveable { mutableStateOf(false) }
+    var goalAllocated by rememberSaveable {
+        mutableStateOf(localStorage.getString("goal_allocated", "0") ?: "0")
+    }
+    var savedCategories by rememberSaveable { mutableStateOf(restoredCategories) }
+    var draftCategories by rememberSaveable { mutableStateOf(restoredCategories) }
+    var hasSavedBudget by rememberSaveable {
+        mutableStateOf(localStorage.getBoolean("has_saved_budget", false))
+    }
+
+    // Save updated profile, budget and goal data automatically after each UI update.
+    // Saves locally; internet access, user accounts and Firebase are not required.
+    SideEffect {
+        localStorage.edit()
+            .putBoolean("setup_complete", setupComplete)
+            .putString("name", name)
+            .putString("experience", experience)
+            .putString("employment", employment)
+            .putString("income", income)
+            .putString("savings", savings)
+            .putString("goal", goal)
+            .putString("target", target)
+            .putString("contribution", contribution)
+            .putString("goal_allocated", goalAllocated)
+            .putString("categories", JSONArray(savedCategories).toString())
+            .putBoolean("has_saved_budget", hasSavedBudget)
+            .apply()
+    }
     var spendingReduction by rememberSaveable { mutableStateOf("100") }
     var projectionYears by rememberSaveable { mutableIntStateOf(1) }
     var selectedLesson by rememberSaveable { mutableIntStateOf(0) }
@@ -285,13 +337,25 @@ fun FinanceBuddyApp() {
         screen = 9
     }
 
+    val employmentOptions = if (experience == "Not yet employed") {
+        listOf("Currently job-seeking")
+    } else {
+        listOf("Full-time employed", "Part-time employed", "Currently job-seeking")
+    }
+
     when (screen) {
         0 -> Column(
             Modifier.fillMaxSize().padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Text("FinanceBuddy", fontSize = 32.sp, fontWeight = FontWeight.Bold)
+            Image(
+                painter = painterResource(id = R.drawable.financebuddy_logo),
+                contentDescription = "FinanceBuddy Logo",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(220.dp)
+            )
             Spacer(Modifier.height(16.dp))
             Text("Your Personal Financial Companion")
             Spacer(Modifier.height(32.dp))
@@ -306,10 +370,15 @@ fun FinanceBuddyApp() {
                 singleLine = true, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(24.dp))
             Text("How long have you been working?", fontWeight = FontWeight.Bold)
-            RadioChoices(listOf("Not yet employed", "Less than 1 year", "1-2 years", "2-3 years"), experience) { experience = it }
+            RadioChoices(listOf("Not yet employed", "Less than 1 year", "1-2 years", "2-3 years"), experience) {
+                experience = it
+                if (it == "Not yet employed") {
+                    employment = "Currently job-seeking"
+                }
+            }
             Spacer(Modifier.height(16.dp))
             Text("Employment Status", fontWeight = FontWeight.Bold)
-            RadioChoices(listOf("Full-time employed", "Part-time employed", "Currently job-seeking"), employment) { employment = it }
+            RadioChoices(employmentOptions, employment) { employment = it }
             if (experience == "Not yet employed" || employment == "Currently job-seeking") {
                 Spacer(Modifier.height(8.dp))
                 Text("You can continue with S$0 income and S$0 planned savings. Enter your actual expenses and available savings.", fontSize = 13.sp)
@@ -407,7 +476,7 @@ fun FinanceBuddyApp() {
             }
             Spacer(Modifier.height(24.dp))
             Button(
-                onClick = { screen = 4 },
+                onClick = { setupComplete = true; screen = 4 },
                 enabled = validFinances && validGoal && (!hasSavedBudget || monthlySaving <= remainingBalance.coerceAtLeast(0.0) || (monthlyIncome == 0.0 && monthlySaving == 0.0)),
                 modifier = Modifier.fillMaxWidth()
             ) { Text("Finish Setup") }
@@ -415,12 +484,23 @@ fun FinanceBuddyApp() {
         }
 
         4 -> Page {
-            Text("FinanceBuddy", color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(10.dp))
-            Text("Hey, $name! 👋", fontSize = 28.sp, fontWeight = FontWeight.Bold)
-            Text("Here's your financial overview.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Hey, $name! 👋", fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                    Text("Here's your financial overview.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Spacer(Modifier.width(12.dp))
+                Image(
+                    painter = painterResource(id = R.drawable.financebuddy_logo),
+                    contentDescription = "FinanceBuddy Logo",
+                    modifier = Modifier.size(72.dp)
+                )
+            }
             Spacer(Modifier.height(24.dp))
 
             if (hasSavedBudget) {
